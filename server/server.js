@@ -2,31 +2,62 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
+const {
+  getRoom,
+  addOperation,
+  undoOperation,
+  getOperations
+} = require("./rooms");
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.static("client"));
 
-// 🔑 In-memory history (per app / per room later)
-const operations = [];
-
 io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
+  const rawRoomId = socket.handshake.query?.roomId;
+  const roomId =
+    typeof rawRoomId === "string" && rawRoomId.trim()
+      ? rawRoomId
+      : "global";
 
-   // 🔹 Send full history to the new user
-  socket.emit("history:init", operations);
+  // const roomId = socket.handshake.query.roomId || "global";
+  socket.join(roomId);
 
-  // 🔹 Receive new stroke
+  
+  console.log(`User ${socket.id} joined room ${roomId}`);
+
+  // 🔹 Send room history on join
+  socket.emit("history:init", getOperations(roomId));
+
+  // 🔹 New stroke
   socket.on("draw:stroke", (stroke) => {
-    operations.push(stroke);
-
-    // broadcast to others
-    io.emit("draw:stroke", stroke);
+    addOperation(roomId, stroke);
+    io.to(roomId).emit("draw:stroke", stroke);
   });
 
+  // 🔹 Global undo (room-scoped)
+  socket.on("undo", () => {
+    const removed = undoOperation(roomId);
+    if (!removed) return;
+
+    io.to(roomId).emit("history:update", getOperations(roomId));
+  });
+
+  // 🔹 Cursor movement
+  socket.on("cursor:move", (data) => {
+    socket.to(roomId).emit("cursor:move", {
+      id: socket.id,
+      x: data.x,
+      y: data.y
+    });
+  });
+
+  // 🔹 Disconnect
   socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
+    socket.to(roomId).emit("cursor:leave", socket.id);
+    console.log(`User ${socket.id} left room ${roomId}`);
   });
 });
 

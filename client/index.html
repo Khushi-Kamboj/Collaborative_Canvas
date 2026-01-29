@@ -16,6 +16,7 @@
     </div>
 
     <div id="canvas-wrapper">
+      <div id="cursor-layer"></div>
       <canvas id="permanent"></canvas>
       <canvas id="live"></canvas>
     </div>
@@ -24,11 +25,11 @@
       <button id="undoBtn" class="tool-btn">↩ Undo</button>
       <button id="redoBtn" class="tool-btn">↪ Redo</button>
     </div>
-    
+
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="canvas.js"></script>
-  <script src="main.js"></script>
+  <script type="module" src="main.js"></script>
+
 </body>
 </html>
