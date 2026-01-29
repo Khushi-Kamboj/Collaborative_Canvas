@@ -4,7 +4,7 @@
 
 body {
   margin: 0;
-  height: 100vh;
+  height: 100%;
   background: #ede9e9;
   font-family: "Segoe UI", sans-serif;
   display: flex;
@@ -67,6 +67,11 @@ body {
 
 #brushSize {
   cursor: pointer;
+}
+
+#undoRedoBtns{
+  display:flex;
+  gap:20px;
 }
 
 #canvas-wrapper {
