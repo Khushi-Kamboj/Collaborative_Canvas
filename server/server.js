@@ -35,6 +35,8 @@ io.on("connection", (socket) => {
   // Send room history on join
   socket.emit("history:init", getOperations(roomId));
 
+  socket.emit("users:update", getUsers(roomId));
+  // New stroke
   socket.on("stroke:end", (stroke) => {
     addOperation(roomId, stroke);
     io.to(roomId).emit("history:update", getOperations(roomId));

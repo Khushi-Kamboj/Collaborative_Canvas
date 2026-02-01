@@ -56,8 +56,8 @@ const redoBtn = document.getElementById("redoBtn");
 // ==========================
 
 const cursorLayer = document.getElementById("cursor-layer");
-const cursors = {};        // socketId -> DOM element
-const usersMap = {};      // socketId -> { name, color }   (ADDED)
+const cursors = {};
+const usersMap = {};
 
 
 // ==========================
@@ -101,17 +101,6 @@ function getMousePos(e) {
   };
 }
 
-function createStrokeOperation(points) {
-  return {
-    id: Date.now() + Math.random(),
-    tool: currentTool,
-    color: currentColor,
-    size: currentSize,
-    points: [...points],
-    timestamp: Date.now()
-  };
-}
-
 
 // ==========================
 // Cursor Throttling
@@ -146,14 +135,6 @@ function renderStroke(ctx, stroke) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  if (points.length === 1) {
-    ctx.beginPath();
-    ctx.arc(points[0].x, points[0].y, size / 2, 0, Math.PI * 2);
-    ctx.fillStyle = tool === "eraser" ? "#ffffff" : color;
-    ctx.fill();
-    return;
-  }
-
   if (points.length < 2) return;
 
   ctx.beginPath();
@@ -165,11 +146,7 @@ function renderStroke(ctx, stroke) {
     ctx.quadraticCurveTo(points[i].x, points[i].y, midX, midY);
   }
 
-  ctx.lineTo(
-    points[points.length - 1].x,
-    points[points.length - 1].y
-  );
-
+  ctx.lineTo(points.at(-1).x, points.at(-1).y);
   ctx.stroke();
 }
 
@@ -200,38 +177,30 @@ redoBtn.addEventListener("click", () => socket.emit("redo"));
 
 liveCanvas.addEventListener("mousedown", (e) => {
   drawing = true;
-  pointsBuffer = [];
   const start = getMousePos(e);
-  pointsBuffer.push(start);
 
   activeStroke = {
     id: Date.now() + Math.random(),
     tool: currentTool,
     color: currentColor,
     size: currentSize,
-    points: [...pointsBuffer]
+    points: [start]
   };
 
-  renderStroke(pCtx, activeStroke);
-
   socket.emit("stroke:start", activeStroke);
-
 });
 
 liveCanvas.addEventListener("mousemove", (e) => {
   const pos = getMousePos(e);
   emitCursorMove(pos.x, pos.y);
 
-  if (!drawing) return;
+  if (!drawing || !activeStroke) return;
 
-  pointsBuffer.push(pos);
   activeStroke.points.push(pos);
 
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
 
-  if (activeStroke.tool === "eraser") {
-    drawEraserPreview(lCtx, pos, activeStroke.size);
-  } else {
+  if (activeStroke.tool !== "eraser") {
     renderStroke(lCtx, activeStroke);
   }
 
@@ -239,26 +208,28 @@ liveCanvas.addEventListener("mousemove", (e) => {
     strokeId: activeStroke.id,
     point: pos
   });
-
 });
 
 liveCanvas.addEventListener("mouseup", () => {
-  if (!drawing) return;
+  if (!drawing || !activeStroke) return;
   drawing = false;
 
-  renderStroke(pCtx, activeStroke);
+  socket.emit("stroke:end", activeStroke);
   activeStroke = null;
 
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
-  pointsBuffer = [];
 });
 
 liveCanvas.addEventListener("mouseleave", () => {
   drawing = false;
-  pointsBuffer = [];
+  activeStroke = null;
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
 });
 
+
+// ==========================
+// Remote Live Strokes
+// ==========================
 
 socket.on("stroke:start", (stroke) => {
   liveRemoteStrokes[stroke.id] = stroke;
@@ -271,23 +242,10 @@ socket.on("stroke:update", ({ strokeId, point }) => {
   stroke.points.push(point);
 
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
-  Object.values(liveRemoteStrokes).forEach(s =>
-    renderStroke(lCtx, s)
-  );
+  Object.values(liveRemoteStrokes).forEach(s => {
+    if (s.tool !== "eraser") renderStroke(lCtx, s);
+  });
 });
-
-function drawEraserPreview(ctx, point, size) {
-  ctx.save();
-  ctx.strokeStyle = "rgba(0,0,0,0.4)";
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 4]);
-
-  ctx.beginPath();
-  ctx.arc(point.x, point.y, size / 2, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.restore();
-}
 
 
 // ==========================
@@ -298,8 +256,6 @@ socket.on("history:init", (serverOperations) => {
   operations.length = 0;
   operations.push(...serverOperations);
   redrawCanvas();
-  hasHistory = true;
-  pendingStrokes.length = 0;
 });
 
 socket.on("history:update", (serverOperations) => {
@@ -309,75 +265,4 @@ socket.on("history:update", (serverOperations) => {
 
   Object.keys(liveRemoteStrokes).forEach(k => delete liveRemoteStrokes[k]);
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
-});
-
-
-// ==========================
-// Remote Cursors 
-// ==========================
-
-socket.on("cursor:move", ({ id, x, y }) => {
-  let cursor = cursors[id];
-
-  if (!cursor) {
-    cursor = document.createElement("div");
-    cursor.className = "remote-cursor";
-    cursorLayer.appendChild(cursor);
-    cursors[id] = cursor;
-  }
-
-  // use SERVER-assigned user color
-  const user = usersMap[id];
-  cursor.style.background = user ? user.color : "#999";
-
-  cursor.style.left = x + "px";
-  cursor.style.top = y + "px";
-});
-
-socket.on("cursor:leave", (id) => {
-  const cursor = cursors[id];
-  if (cursor) {
-    cursor.remove();
-    delete cursors[id];
-  }
-});
-
-
-// ==========================
-// Online Users List 
-// ==========================
-
-const userList = document.getElementById("userList");
-
-socket.on("users:update", (users) => {
-  userList.innerHTML = "";
-
-  // keep local map in sync
-  Object.keys(usersMap).forEach(k => delete usersMap[k]);
-
-  Object.entries(users).forEach(([id, user]) => {
-    usersMap[id] = user;
-
-    const div = document.createElement("div");
-    div.textContent = user.name;
-    div.style.borderLeft = `4px solid ${user.color}`;
-    userList.appendChild(div);
-  });
-});
-
-
-// ==========================
-// Last Seen Cursor Marker
-// ==========================
-
-socket.on("cursor:last", ({ x, y, color }) => {
-  const dot = document.createElement("div");
-  dot.className = "remote-cursor";
-  dot.style.background = color;
-  dot.style.left = x + "px";
-  dot.style.top = y + "px";
-
-  cursorLayer.appendChild(dot);
-
-  setTimeout(() => dot.remove(), 4000);
 });
