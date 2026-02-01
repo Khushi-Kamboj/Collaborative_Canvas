@@ -56,6 +56,13 @@ io.on("connection", (socket) => {
   io.to(roomId).emit("history:update", getOperations(roomId));
 });
 
+socket.on("history:update", (serverOperations) => {
+  console.log("HISTORY UPDATE", serverOperations.length);
+  operations.length = 0;
+  operations.push(...serverOperations);
+  redrawCanvas();
+});
+
   // 🔹 Cursor movement
   socket.on("cursor:move", (data) => {
     socket.to(roomId).emit("cursor:move", {
