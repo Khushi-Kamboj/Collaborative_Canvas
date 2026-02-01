@@ -18,7 +18,7 @@ const lCtx = liveCanvas.getContext("2d");
 
 
 // ==========================
-// History State (SERVER-DRIVEN)
+// History State
 // ==========================
 
 const operations = [];
@@ -35,6 +35,8 @@ let currentTool = "brush";
 let currentColor = "#000000";
 let currentSize = 4;
 let pointsBuffer = [];
+let activeStroke = null;
+const liveRemoteStrokes = {};
 
 
 // ==========================
@@ -132,7 +134,14 @@ function emitCursorMove(x, y) {
 function renderStroke(ctx, stroke) {
   const { tool, color, size, points } = stroke;
 
-  ctx.strokeStyle = tool === "eraser" ? "#ffffff" : color;
+  if (tool === "eraser") {
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.strokeStyle = "rgba(0,0,0,1)";
+  } else {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = color;
+  }
+
   ctx.lineWidth = size;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -192,12 +201,21 @@ redoBtn.addEventListener("click", () => socket.emit("redo"));
 liveCanvas.addEventListener("mousedown", (e) => {
   drawing = true;
   pointsBuffer = [];
-
   const start = getMousePos(e);
   pointsBuffer.push(start);
 
-  const dotStroke = createStrokeOperation(pointsBuffer);
-  renderStroke(pCtx, dotStroke);
+  activeStroke = {
+    id: Date.now() + Math.random(),
+    tool: currentTool,
+    color: currentColor,
+    size: currentSize,
+    points: [...pointsBuffer]
+  };
+
+  renderStroke(pCtx, activeStroke);
+
+  socket.emit("stroke:start", activeStroke);
+
 });
 
 liveCanvas.addEventListener("mousemove", (e) => {
@@ -207,18 +225,29 @@ liveCanvas.addEventListener("mousemove", (e) => {
   if (!drawing) return;
 
   pointsBuffer.push(pos);
+  activeStroke.points.push(pos);
+
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
 
-  const previewStroke = createStrokeOperation(pointsBuffer);
-  renderStroke(lCtx, previewStroke);
+  if (activeStroke.tool === "eraser") {
+    drawEraserPreview(lCtx, pos, activeStroke.size);
+  } else {
+    renderStroke(lCtx, activeStroke);
+  }
+
+  socket.emit("stroke:update", {
+    strokeId: activeStroke.id,
+    point: pos
+  });
+
 });
 
 liveCanvas.addEventListener("mouseup", () => {
   if (!drawing) return;
   drawing = false;
 
-  const strokeOp = createStrokeOperation(pointsBuffer);
-  socket.emit("draw:stroke", strokeOp);
+  renderStroke(pCtx, activeStroke);
+  activeStroke = null;
 
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
   pointsBuffer = [];
@@ -229,6 +258,36 @@ liveCanvas.addEventListener("mouseleave", () => {
   pointsBuffer = [];
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
 });
+
+
+socket.on("stroke:start", (stroke) => {
+  liveRemoteStrokes[stroke.id] = stroke;
+});
+
+socket.on("stroke:update", ({ strokeId, point }) => {
+  const stroke = liveRemoteStrokes[strokeId];
+  if (!stroke) return;
+
+  stroke.points.push(point);
+
+  lCtx.clearRect(0, 0, WIDTH, HEIGHT);
+  Object.values(liveRemoteStrokes).forEach(s =>
+    renderStroke(lCtx, s)
+  );
+});
+
+function drawEraserPreview(ctx, point, size) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(0,0,0,0.4)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, size / 2, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.restore();
+}
 
 
 // ==========================
@@ -247,6 +306,9 @@ socket.on("history:update", (serverOperations) => {
   operations.length = 0;
   operations.push(...serverOperations);
   redrawCanvas();
+
+  Object.keys(liveRemoteStrokes).forEach(k => delete liveRemoteStrokes[k]);
+  lCtx.clearRect(0, 0, WIDTH, HEIGHT);
 });
 
 

@@ -35,13 +35,11 @@ io.on("connection", (socket) => {
   // Send room history on join
   socket.emit("history:init", getOperations(roomId));
 
-  // New stroke
-  socket.on("draw:stroke", (stroke) => {
+  socket.on("stroke:end", (stroke) => {
     addOperation(roomId, stroke);
-
-    // always sync full history
     io.to(roomId).emit("history:update", getOperations(roomId));
   });
+
 
   // Global undo (room-scoped)
   socket.on("undo", () => {
@@ -59,8 +57,12 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("history:update", getOperations(roomId));
   });
 
+  // store last cursor position per socket
+  let lastCursor = { x: 0, y: 0 };
+
   // Cursor movement
   socket.on("cursor:move", (data) => {
+    lastCursor = { x: data.x, y: data.y };
     socket.to(roomId).emit("cursor:move", {
       id: socket.id,
       x: data.x,
@@ -77,8 +79,39 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("users:update", getUsers(roomId));
   });
 
+  socket.on("stroke:start", (data) => {
+    socket.to(roomId).emit("stroke:start", {
+      id: socket.id,
+      ...data
+    });
+  });
+
+  socket.on("stroke:update", (data) => {
+    socket.to(roomId).emit("stroke:update", {
+      id: socket.id,
+      ...data
+    });
+  });
+
+  socket.on("stroke:end", (stroke) => {
+    addOperation(roomId, stroke);
+    io.to(roomId).emit("history:update", getOperations(roomId));
+  });
+
+
   // Disconnect
   socket.on("disconnect", () => {
+    const users = getUsers(roomId);
+    const user = users[socket.id];
+
+    // send last known position + color
+    if (user) {
+      socket.to(roomId).emit("cursor:last", {
+        x: lastCursor.x,
+        y: lastCursor.y,
+        color: user.color
+      });
+    }
     removeUser(roomId, socket.id);
 
     io.to(roomId).emit("users:update", getUsers(roomId));
