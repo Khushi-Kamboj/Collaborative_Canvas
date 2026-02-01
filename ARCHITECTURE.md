@@ -101,7 +101,6 @@ This separation prevents flickering, improves performance, and keeps rendering d
 
 Each stroke is represented as a serializable object:
 
-```js
 {
   id: string,
   tool: "brush" | "eraser",
@@ -112,102 +111,76 @@ Each stroke is represented as a serializable object:
 }
 This model allows deterministic replay, network transmission, and global undo/redo.
 
-7. Undo / Redo Strategy (Global)
+## 7. Undo / Redo Strategy (Global)
 Undo and redo are implemented using a server-side linear operation log.
 
 The server maintains:
 
-operations[] – committed strokes
-
-redoStack[] – undone strokes
-
-Undo removes the most recent stroke globally, regardless of author.
-
-Redo reapplies the most recently undone stroke.
-
-After each undo or redo, the server broadcasts the updated operation list.
-
-Clients redraw the canvas from scratch to ensure consistency.
+- operations[] – committed strokes
+- redoStack[] – undone strokes
+- Undo removes the most recent stroke globally, regardless of author.
+- Redo reapplies the most recently undone stroke.
+- After each undo or redo, the server broadcasts the updated operation list.
+- Clients redraw the canvas from scratch to ensure consistency.
 
 Design Decision
+
 Undo/redo is intentionally global to:
+- Maintain a single authoritative history
+- Avoid divergent canvas states
+- Simplify conflict resolution
 
-Maintain a single authoritative history
-
-Avoid divergent canvas states
-
-Simplify conflict resolution
-
-8. Conflict Handling
-Simultaneous drawing conflicts are handled using server-enforced ordering.
-
-The server defines a total order of strokes.
-
-Later strokes overwrite earlier strokes in overlapping regions.
-
-No per-pixel locking or merging is performed.
+## 8. Conflict Handling
+- Simultaneous drawing conflicts are handled using server-enforced ordering.
+- The server defines a total order of strokes.
+- Later strokes overwrite earlier strokes in overlapping regions.
+- No per-pixel locking or merging is performed.
 
 This approach favors determinism and simplicity.
 
-9. Eraser Design
+## 9. Eraser Design
 The eraser tool uses the Canvas API:
 
 globalCompositeOperation = "destination-out"
+
 Live Preview Limitation
-The live preview canvas is transparent.
-
-destination-out requires existing pixels to erase.
-
-Therefore, real-time erasing cannot be previewed directly.
+- The live preview canvas is transparent.
+- destination-out requires existing pixels to erase.
+- Therefore, real-time erasing cannot be previewed directly.
 
 Solution
-A visual eraser indicator is shown during interaction.
+- A visual eraser indicator is shown during interaction.
+- The actual erase is applied only after server confirmation.
+- This prevents client-side divergence and maintains server authority.
 
-The actual erase is applied only after server confirmation.
-
-This prevents client-side divergence and maintains server authority.
-
-10. Performance Decisions
+## 10. Performance Decisions
 Key performance optimizations include:
 
-Dual canvas rendering (live vs permanent)
-
-Cursor movement throttling
-
-Stroke point batching
-
-Redraws triggered only by state changes
+- Dual canvas rendering (live vs permanent)
+- Cursor movement throttling
+- Stroke point batching
+- Redraws triggered only by state changes
 
 Tradeoffs
-The full operation log is broadcast on each update for simplicity.
+- The full operation log is broadcast on each update for simplicity.
+- This ensures strong consistency but limits scalability.
+- Future optimizations could include snapshotting or incremental diffs.
 
-This ensures strong consistency but limits scalability.
+## 11. State Synchronization Guarantees
+- The server is the single source of truth.
+- Clients never mutate shared state directly.
+- All clients eventually converge to the same canvas state.
 
-Future optimizations could include snapshotting or incremental diffs.
+## 12. Known Limitations
+- Undo/redo is global and may remove strokes from other users.
+- The full canvas is redrawn on every history update.
+- Eraser preview is visual only.
+- These are intentional design tradeoffs to prioritize correctness and clarity.
 
-11. State Synchronization Guarantees
-The server is the single source of truth.
-
-Clients never mutate shared state directly.
-
-All clients eventually converge to the same canvas state.
-
-12. Known Limitations
-Undo/redo is global and may remove strokes from other users.
-
-The full canvas is redrawn on every history update.
-
-Eraser preview is visual only.
-
-These are intentional design tradeoffs to prioritize correctness and clarity.
-
-13. Summary
+## 13. Summary
 This architecture prioritizes:
 
-Consistency over local autonomy
-
-Deterministic rendering
-
-Clear separation of responsibilities
-
-The result is a robust real-time collaborative drawing system with predictable behavior under concurrent usage.
+- Consistency over local autonomy
+- Deterministic rendering
+- Clear separation of responsibilities
+- The result is a robust real-time collaborative drawing system with predictable behavior under concurrent usage.
