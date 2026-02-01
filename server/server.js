@@ -6,6 +6,7 @@ const {
   getRoom,
   addOperation,
   undoOperation,
+  redoOperation, 
   getOperations
 } = require("./rooms");
 
@@ -34,7 +35,9 @@ io.on("connection", (socket) => {
   // 🔹 New stroke
   socket.on("draw:stroke", (stroke) => {
     addOperation(roomId, stroke);
-    io.to(roomId).emit("draw:stroke", stroke);
+
+    // 🔑 always sync full history
+    io.to(roomId).emit("history:update", getOperations(roomId));
   });
 
   // 🔹 Global undo (room-scoped)
@@ -44,6 +47,14 @@ io.on("connection", (socket) => {
 
     io.to(roomId).emit("history:update", getOperations(roomId));
   });
+
+// Redo 
+  socket.on("redo", () => {
+  const redone = redoOperation(roomId);
+  if (!redone) return;
+
+  io.to(roomId).emit("history:update", getOperations(roomId));
+});
 
   // 🔹 Cursor movement
   socket.on("cursor:move", (data) => {

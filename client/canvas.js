@@ -1,3 +1,7 @@
+// ==========================
+// Socket & Canvas Setup
+// ==========================
+
 const socket = window.socket;
 
 const permanentCanvas = document.getElementById("permanent");
@@ -12,21 +16,34 @@ permanentCanvas.height = liveCanvas.height = HEIGHT;
 const pCtx = permanentCanvas.getContext("2d");
 const lCtx = liveCanvas.getContext("2d");
 
-// Operation store
-const operations = [];
-const redoStack = [];
 
+// ==========================
+// History State (SERVER-DRIVEN)
+// ==========================
+
+// Final strokes received from server
+const operations = [];
+
+// History loading flags
 let hasHistory = false;
 const pendingStrokes = [];
 
-// Drawing state
+
+// ==========================
+// Drawing State
+// ==========================
+
 let drawing = false;
 let currentTool = "brush";
 let currentColor = "#000000";
 let currentSize = 4;
 let pointsBuffer = [];
 
-// Toolbar elements
+
+// ==========================
+// Toolbar Elements
+// ==========================
+
 const brushBtn = document.getElementById("brushBtn");
 const eraserBtn = document.getElementById("eraserBtn");
 const colorPicker = document.getElementById("colorPicker");
@@ -34,13 +51,19 @@ const brushSize = document.getElementById("brushSize");
 const undoBtn = document.getElementById("undoBtn");
 const redoBtn = document.getElementById("redoBtn");
 
-redoBtn.disabled = true;
+
+// ==========================
+// Cursor Layer (Multiplayer)
+// ==========================
 
 const cursorLayer = document.getElementById("cursor-layer");
 const cursors = {}; // socketId -> DOM element
 
 
-// UI bindings
+// ==========================
+// UI Bindings
+// ==========================
+
 colorPicker.addEventListener("change", (e) => {
   currentColor = e.target.value;
 });
@@ -49,7 +72,11 @@ brushSize.addEventListener("input", (e) => {
   currentSize = e.target.value;
 });
 
-// Tool selection logic
+
+// ==========================
+// Tool Selection
+// ==========================
+
 function setActiveTool(tool) {
   currentTool = tool;
   brushBtn.classList.toggle("active", tool === "brush");
@@ -58,9 +85,14 @@ function setActiveTool(tool) {
 
 brushBtn.addEventListener("click", () => setActiveTool("brush"));
 eraserBtn.addEventListener("click", () => setActiveTool("eraser"));
+
 setActiveTool("brush");
 
+
+// ==========================
 // Helpers
+// ==========================
+
 function getMousePos(e) {
   const rect = permanentCanvas.getBoundingClientRect();
   return {
@@ -68,6 +100,7 @@ function getMousePos(e) {
     y: e.clientY - rect.top
   };
 }
+
 function createStrokeOperation(points) {
   return {
     id: Date.now() + Math.random(),
@@ -79,12 +112,16 @@ function createStrokeOperation(points) {
   };
 }
 
+
+// ==========================
+// Cursor Throttling
+// ==========================
+
 let lastCursorEmit = 0;
 
 function emitCursorMove(x, y) {
   const now = Date.now();
-  if (now - lastCursorEmit < 30) return; // ~30fps
-
+  if (now - lastCursorEmit < 30) return;
   lastCursorEmit = now;
   socket.emit("cursor:move", { x, y });
 }
@@ -98,6 +135,10 @@ function getColorFromId(id) {
 }
 
 
+// ==========================
+// Stroke Rendering
+// ==========================
+
 function renderStroke(ctx, stroke) {
   const { tool, color, size, points } = stroke;
 
@@ -106,7 +147,7 @@ function renderStroke(ctx, stroke) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // ✅ Single point = dot
+  // Single-point stroke = dot
   if (points.length === 1) {
     ctx.beginPath();
     ctx.arc(points[0].x, points[0].y, size / 2, 0, Math.PI * 2);
@@ -134,28 +175,36 @@ function renderStroke(ctx, stroke) {
   ctx.stroke();
 }
 
-function redrawCanvas() {
-  // Clear permanent canvas
-  pCtx.clearRect(0, 0, WIDTH, HEIGHT);
 
-  // Re-render all operations
+// ==========================
+// Canvas Redraw
+// ==========================
+
+function redrawCanvas() {
+  pCtx.clearRect(0, 0, WIDTH, HEIGHT);
   for (const op of operations) {
     renderStroke(pCtx, op);
   }
 }
 
+
+// ==========================
+// Undo / Redo (SERVER)
+// ==========================
+
 undoBtn.addEventListener("click", () => {
   socket.emit("undo");
 });
 
-
 redoBtn.addEventListener("click", () => {
-  if (redoStack.length === 0) return;
-
-  const redoOp = redoStack.pop();
-  operations.push(redoOp);
-  redrawCanvas();
+  console.log("REDO CLICKED");
+  socket.emit("redo");
 });
+
+
+// ==========================
+// Drawing Events
+// ==========================
 
 liveCanvas.addEventListener("mousedown", (e) => {
   drawing = true;
@@ -164,7 +213,7 @@ liveCanvas.addEventListener("mousedown", (e) => {
   const start = getMousePos(e);
   pointsBuffer.push(start);
 
-  // 🔑 draw a dot immediately
+  // Immediate dot feedback
   const dotStroke = createStrokeOperation(pointsBuffer);
   renderStroke(pCtx, dotStroke);
 });
@@ -182,19 +231,13 @@ liveCanvas.addEventListener("mousemove", (e) => {
   renderStroke(lCtx, previewStroke);
 });
 
-
 liveCanvas.addEventListener("mouseup", () => {
   if (!drawing) return;
   drawing = false;
 
   const strokeOp = createStrokeOperation(pointsBuffer);
-  // operations.push(strokeOp);
-  redoStack.length = 0; // clear redo history on new action
 
-  // Commit stroke
-  renderStroke(pCtx, strokeOp);
-
-  // send to server
+  // DO NOT push locally — server is authority
   socket.emit("draw:stroke", strokeOp);
 
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
@@ -207,33 +250,31 @@ liveCanvas.addEventListener("mouseleave", () => {
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
 });
 
-socket.on("draw:stroke", (strokeOp) => {
-  if (!hasHistory) {
-    pendingStrokes.push(strokeOp);
-    return;
-  }
 
-  operations.push(strokeOp);
-  redoStack.length = 0;
-  renderStroke(pCtx, strokeOp);
-});
+// ==========================
+// Socket Events
+// ==========================
+
+// socket.on("draw:stroke", (strokeOp) => {
+//   if (!hasHistory) {
+//     pendingStrokes.push(strokeOp);
+//     return;
+//   }
+
+//   operations.push(strokeOp);
+//   renderStroke(pCtx, strokeOp);
+// });
 
 socket.on("history:init", (serverOperations) => {
-  console.log("History received:", serverOperations.length);
-
   operations.length = 0;
-  redoStack.length = 0;
 
   for (const op of serverOperations) {
     operations.push(op);
   }
 
   redrawCanvas();
-
-  // 🔑 mark history as loaded
   hasHistory = true;
 
-  // 🔑 apply any strokes received during init
   for (const stroke of pendingStrokes) {
     operations.push(stroke);
     renderStroke(pCtx, stroke);
@@ -244,7 +285,6 @@ socket.on("history:init", (serverOperations) => {
 
 socket.on("history:update", (serverOperations) => {
   operations.length = 0;
-  redoStack.length = 0;
 
   for (const op of serverOperations) {
     operations.push(op);
@@ -252,6 +292,11 @@ socket.on("history:update", (serverOperations) => {
 
   redrawCanvas();
 });
+
+
+// ==========================
+// Remote Cursors
+// ==========================
 
 socket.on("cursor:move", ({ id, x, y }) => {
   let cursor = cursors[id];
