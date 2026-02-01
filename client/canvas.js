@@ -21,10 +21,7 @@ const lCtx = liveCanvas.getContext("2d");
 // History State (SERVER-DRIVEN)
 // ==========================
 
-// Final strokes received from server
 const operations = [];
-
-// History loading flags
 let hasHistory = false;
 const pendingStrokes = [];
 
@@ -57,7 +54,8 @@ const redoBtn = document.getElementById("redoBtn");
 // ==========================
 
 const cursorLayer = document.getElementById("cursor-layer");
-const cursors = {}; // socketId -> DOM element
+const cursors = {};        // socketId -> DOM element
+const usersMap = {};      // socketId -> { name, color }   (ADDED)
 
 
 // ==========================
@@ -126,14 +124,6 @@ function emitCursorMove(x, y) {
   socket.emit("cursor:move", { x, y });
 }
 
-function getColorFromId(id) {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = id.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return `hsl(${hash % 360}, 70%, 50%)`;
-}
-
 
 // ==========================
 // Stroke Rendering
@@ -147,7 +137,6 @@ function renderStroke(ctx, stroke) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Single-point stroke = dot
   if (points.length === 1) {
     ctx.beginPath();
     ctx.arc(points[0].x, points[0].y, size / 2, 0, Math.PI * 2);
@@ -189,17 +178,11 @@ function redrawCanvas() {
 
 
 // ==========================
-// Undo / Redo (SERVER)
+// Undo / Redo
 // ==========================
 
-undoBtn.addEventListener("click", () => {
-  socket.emit("undo");
-});
-
-redoBtn.addEventListener("click", () => {
-  console.log("REDO CLICKED");
-  socket.emit("redo");
-});
+undoBtn.addEventListener("click", () => socket.emit("undo"));
+redoBtn.addEventListener("click", () => socket.emit("redo"));
 
 
 // ==========================
@@ -213,7 +196,6 @@ liveCanvas.addEventListener("mousedown", (e) => {
   const start = getMousePos(e);
   pointsBuffer.push(start);
 
-  // Immediate dot feedback
   const dotStroke = createStrokeOperation(pointsBuffer);
   renderStroke(pCtx, dotStroke);
 });
@@ -236,8 +218,6 @@ liveCanvas.addEventListener("mouseup", () => {
   drawing = false;
 
   const strokeOp = createStrokeOperation(pointsBuffer);
-
-  // DO NOT push locally — server is authority
   socket.emit("draw:stroke", strokeOp);
 
   lCtx.clearRect(0, 0, WIDTH, HEIGHT);
@@ -252,50 +232,26 @@ liveCanvas.addEventListener("mouseleave", () => {
 
 
 // ==========================
-// Socket Events
+// History Sync
 // ==========================
-
-// socket.on("draw:stroke", (strokeOp) => {
-//   if (!hasHistory) {
-//     pendingStrokes.push(strokeOp);
-//     return;
-//   }
-
-//   operations.push(strokeOp);
-//   renderStroke(pCtx, strokeOp);
-// });
 
 socket.on("history:init", (serverOperations) => {
   operations.length = 0;
-
-  for (const op of serverOperations) {
-    operations.push(op);
-  }
-
+  operations.push(...serverOperations);
   redrawCanvas();
   hasHistory = true;
-
-  for (const stroke of pendingStrokes) {
-    operations.push(stroke);
-    renderStroke(pCtx, stroke);
-  }
-
   pendingStrokes.length = 0;
 });
 
 socket.on("history:update", (serverOperations) => {
   operations.length = 0;
-
-  for (const op of serverOperations) {
-    operations.push(op);
-  }
-
+  operations.push(...serverOperations);
   redrawCanvas();
 });
 
 
 // ==========================
-// Remote Cursors
+// Remote Cursors 
 // ==========================
 
 socket.on("cursor:move", ({ id, x, y }) => {
@@ -304,10 +260,13 @@ socket.on("cursor:move", ({ id, x, y }) => {
   if (!cursor) {
     cursor = document.createElement("div");
     cursor.className = "remote-cursor";
-    cursor.style.background = getColorFromId(id);
     cursorLayer.appendChild(cursor);
     cursors[id] = cursor;
   }
+
+  // use SERVER-assigned user color
+  const user = usersMap[id];
+  cursor.style.background = user ? user.color : "#999";
 
   cursor.style.left = x + "px";
   cursor.style.top = y + "px";
@@ -319,4 +278,44 @@ socket.on("cursor:leave", (id) => {
     cursor.remove();
     delete cursors[id];
   }
+});
+
+
+// ==========================
+// Online Users List 
+// ==========================
+
+const userList = document.getElementById("userList");
+
+socket.on("users:update", (users) => {
+  userList.innerHTML = "";
+
+  // keep local map in sync
+  Object.keys(usersMap).forEach(k => delete usersMap[k]);
+
+  Object.entries(users).forEach(([id, user]) => {
+    usersMap[id] = user;
+
+    const div = document.createElement("div");
+    div.textContent = user.name;
+    div.style.borderLeft = `4px solid ${user.color}`;
+    userList.appendChild(div);
+  });
+});
+
+
+// ==========================
+// Last Seen Cursor Marker
+// ==========================
+
+socket.on("cursor:last", ({ x, y, color }) => {
+  const dot = document.createElement("div");
+  dot.className = "remote-cursor";
+  dot.style.background = color;
+  dot.style.left = x + "px";
+  dot.style.top = y + "px";
+
+  cursorLayer.appendChild(dot);
+
+  setTimeout(() => dot.remove(), 4000);
 });

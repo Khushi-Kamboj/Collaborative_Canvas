@@ -3,7 +3,10 @@
 // rooms = {
 //   roomId: {
 //     operations: [],
-//     redoStack: []
+//     redoStack: [],
+//     users: {
+//       socketId: { name, color }
+//     }
 //   }
 // }
 
@@ -13,7 +16,8 @@ function getRoom(roomId) {
   if (!rooms[roomId]) {
     rooms[roomId] = {
       operations: [],
-      redoStack: []
+      redoStack: [],
+      users: {}
     };
   }
   return rooms[roomId];
@@ -24,7 +28,7 @@ function addOperation(roomId, operation) {
   const room = getRoom(roomId);
   room.operations.push(operation);
 
-  // 🔑 Any new draw clears redo history
+  // Any new draw clears redo history
   room.redoStack.length = 0;
 }
 
@@ -54,10 +58,31 @@ function getOperations(roomId) {
   return [...room.operations]; // defensive copy
 }
 
+/* ======================
+   User State
+====================== */
+
+function addUser(roomId, socketId, user) {
+  const room = getRoom(roomId);
+  room.users[socketId] = user;
+}
+
+function removeUser(roomId, socketId) {
+  const room = getRoom(roomId);
+  delete room.users[socketId];
+}
+
+function getUsers(roomId) {
+  return getRoom(roomId).users;
+}
+
 module.exports = {
   getRoom,
   addOperation,
   undoOperation,
   redoOperation,
-  getOperations
+  getOperations,
+  addUser,
+  removeUser,
+  getUsers
 };
