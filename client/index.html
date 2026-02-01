@@ -1,33 +1,66 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
   <title>Collaborative Canvas</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app-container">
 
-    <div id="toolbar">
-      <button id="brushBtn" class="tool-btn active">🖌 Brush</button>
-      <button id="eraserBtn" class="tool-btn">🧽 Eraser</button>
-
-      <input type="color" id="colorPicker" />
-      <input type="range" id="brushSize" min="1" max="20" value="4" />
+  <!-- ======================
+       Username Prompt
+  ======================= -->
+  <div id="namePrompt" class="overlay">
+    <div class="name-card">
+      <h2>Join Canvas</h2>
+      <input
+        type="text"
+        id="usernameInput"
+        placeholder="Enter your name"
+      />
+      <button id="joinBtn">Join</button>
     </div>
-
-    <div id="canvas-wrapper">
-      <!-- <div id="cursor-layer"></div> -->
-      <canvas id="permanent"></canvas>
-      <canvas id="live"></canvas>
-    </div>
-
-    <div id="undoRedoBtns">
-      <button id="undoBtn" class="tool-btn">↩ Undo</button>
-      <button id="redoBtn" class="tool-btn">↪ Redo</button>
-    </div>
-
   </div>
 
+  <!-- ======================
+       Main App
+  ======================= -->
+  <div class="app-container" style="display: none;">
+
+    <!-- Sidebar (Users) -->
+    <aside class="sidebar">
+      <h3>Online Users</h3>
+      <div id="userList"></div>
+    </aside>
+
+    <!-- Main Area -->
+    <main class="main-area">
+
+      <!-- Toolbar -->
+      <div id="toolbar">
+        <button id="brushBtn" class="tool-btn active">🖌 Brush</button>
+        <button id="eraserBtn" class="tool-btn">🧽 Eraser</button>
+
+        <input type="color" id="colorPicker" />
+        <input type="range" id="brushSize" min="1" max="20" value="4" />
+      </div>
+
+      <!-- Canvas -->
+      <div id="canvas-wrapper">
+        <canvas id="permanent"></canvas>
+        <canvas id="live"></canvas>
+      </div>
+
+      <!-- Undo / Redo -->
+      <div id="undoRedoBtns">
+        <button id="undoBtn" class="tool-btn">↩ Undo</button>
+        <button id="redoBtn" class="tool-btn">↪ Redo</button>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Scripts -->
   <script src="/socket.io/socket.io.js"></script>
   <script type="module" src="main.js"></script>
 
